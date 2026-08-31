@@ -51,11 +51,15 @@ interface TradePayload {
   entryReason: string;
   exitReason: string;
   timeClassification?: string;
+  direction?: string;
+  groupId?: string;
+  strategyType?: string;
   playbookId: number;
 }
 
 interface PreviewRow {
   ticker: string;
+  strategyType: string;
   type: 'calls' | 'puts';
   direction: 'long' | 'short' | null;
   quantity: number;
@@ -283,6 +287,9 @@ export default function BulkTradeUpload({ onClose, onSuccess }: BulkTradeUploadP
         entryReason: describeEntry(trade),
         exitReason: describeExit(trade) || 'Position still open at time of import',
         timeClassification: classifyTimeOfDay(format(trade.entryTime, 'HH:mm')),
+        direction: trade.direction,
+        groupId: trade.groupId,
+        strategyType: trade.strategyType,
         playbookId: 1,
       }));
     }
@@ -315,6 +322,7 @@ export default function BulkTradeUpload({ onClose, onSuccess }: BulkTradeUploadP
     if (tastyResult) {
       return tastyTrades.map((trade) => ({
         ticker: trade.ticker,
+        strategyType: trade.strategyType,
         type: trade.type,
         direction: trade.direction,
         quantity: trade.quantity,
@@ -328,6 +336,7 @@ export default function BulkTradeUpload({ onClose, onSuccess }: BulkTradeUploadP
 
     return parsedTrades.map((trade) => ({
       ticker: trade.ticker,
+      strategyType: '',
       type: trade.type,
       direction: null,
       quantity: trade.quantity,
@@ -338,6 +347,11 @@ export default function BulkTradeUpload({ onClose, onSuccess }: BulkTradeUploadP
       note: '',
     }));
   }, [tastyResult, tastyTrades, parsedTrades]);
+
+  const closedBlockCount = useMemo(
+    () => (tastyResult ? new Set(tastyResult.trades.map((trade) => trade.groupId)).size : 0),
+    [tastyResult],
+  );
 
   const netPnl = useMemo(
     () => (tastyResult ? tastyResult.trades.reduce((sum, trade) => sum + (trade.pnl ?? 0), 0) : 0),
@@ -482,8 +496,13 @@ export default function BulkTradeUpload({ onClose, onSuccess }: BulkTradeUploadP
           <div className="space-y-4">
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               <div className="bg-muted p-3 rounded-lg">
-                <p className="text-xs text-muted-foreground">Closed trades</p>
-                <p className="text-lg font-semibold">{tastyResult.trades.length}</p>
+                <p className="text-xs text-muted-foreground">Closed legs</p>
+                <p className="text-lg font-semibold">
+                  {tastyResult.trades.length}
+                  <span className="text-xs font-normal text-muted-foreground">
+                    {' '}in {closedBlockCount} position{closedBlockCount === 1 ? '' : 's'}
+                  </span>
+                </p>
               </div>
               <div className="bg-muted p-3 rounded-lg">
                 <p className="text-xs text-muted-foreground">Still open</p>
@@ -583,9 +602,12 @@ export default function BulkTradeUpload({ onClose, onSuccess }: BulkTradeUploadP
                   {previewRows.map((row, index) => (
                     <tr key={index} className="border-t">
                       <td className="p-2">
-                        {row.ticker}
+                        <div>{row.ticker}</div>
+                        {row.strategyType && (
+                          <div className="text-xs text-muted-foreground">{row.strategyType}</div>
+                        )}
                         {row.note && (
-                          <span className="ml-1 text-xs text-muted-foreground">({row.note})</span>
+                          <span className="text-xs text-muted-foreground">({row.note})</span>
                         )}
                       </td>
                       <td className="p-2">

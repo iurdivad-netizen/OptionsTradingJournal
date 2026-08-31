@@ -52,6 +52,10 @@ export interface MatchedTrade {
   exitOrder: string;
   closeKind: CloseKind;
   needsReview: boolean;
+  /** Legs opened together in one broker order share this. */
+  groupId: string;
+  /** Name of the position the legs form, e.g. "Iron Condor". */
+  strategyType: string;
 }
 
 export interface MatchResult {
@@ -324,6 +328,8 @@ function buildTrade(
     exitOrder: close ? close.orderNo : "",
     closeKind: close ? close.kind : "open",
     needsReview: close ? close.needsReview : false,
+    groupId: "",
+    strategyType: "",
   };
 }
 
@@ -472,10 +478,128 @@ export function matchTastytradeTrades(
     });
   });
 
+  assignGroups([...trades, ...openPositions]);
+
   trades.sort((a, b) => (a.exitTime?.getTime() ?? 0) - (b.exitTime?.getTime() ?? 0));
   openPositions.sort((a, b) => a.entryTime.getTime() - b.entryTime.getTime());
 
   return { trades, openPositions, warnings, skippedRows };
+}
+
+interface LegSummary {
+  type: OptionType;
+  direction: Direction;
+  strike: number;
+  expiration: number;
+  quantity: number;
+}
+
+function nameLeg(leg: LegSummary): string {
+  return `${leg.direction === "long" ? "Long" : "Short"} ${leg.type === "calls" ? "Call" : "Put"}`;
+}
+
+/**
+ * Names the position a set of legs forms. Falls back to a leg count rather than
+ * guessing, so an unusual combination is reported honestly instead of being
+ * labelled as something it is not.
+ */
+export function classifyStrategy(legs: LegSummary[], netEntryCash: number): string {
+  if (legs.length === 0) return "";
+  if (legs.length === 1) return nameLeg(legs[0]);
+
+  const calls = legs.filter((leg) => leg.type === "calls");
+  const puts = legs.filter((leg) => leg.type === "puts");
+  const longs = legs.filter((leg) => leg.direction === "long");
+  const shorts = legs.filter((leg) => leg.direction === "short");
+  const expiries = new Set(legs.map((leg) => leg.expiration));
+  const strikes = new Set(legs.map((leg) => leg.strike));
+  const credit = netEntryCash > 0;
+
+  if (legs.length === 2) {
+    const word = calls.length === 2 ? "Call" : "Put";
+
+    if ((calls.length === 2 || puts.length === 2) && longs.length === 1 && shorts.length === 1) {
+      if (expiries.size > 1) {
+        return strikes.size === 1 ? `${word} Calendar` : `${word} Diagonal`;
+      }
+      return `${word} ${credit ? "Credit" : "Debit"} Spread`;
+    }
+
+    if (calls.length === 1 && puts.length === 1 && expiries.size === 1) {
+      if (shorts.length === 2) return strikes.size === 1 ? "Short Straddle" : "Short Strangle";
+      if (longs.length === 2) return strikes.size === 1 ? "Long Straddle" : "Long Strangle";
+    }
+  }
+
+  if (legs.length === 3 && expiries.size === 1 && (calls.length === 3 || puts.length === 3)) {
+    return `${calls.length === 3 ? "Call" : "Put"} Butterfly`;
+  }
+
+  if (legs.length === 4 && expiries.size === 1) {
+    if (calls.length === 2 && puts.length === 2 && longs.length === 2 && shorts.length === 2) {
+      const shortCall = shorts.find((leg) => leg.type === "calls");
+      const shortPut = shorts.find((leg) => leg.type === "puts");
+      if (shortCall && shortPut) {
+        return shortCall.strike === shortPut.strike ? "Iron Butterfly" : "Iron Condor";
+      }
+    }
+    if (calls.length === 4 || puts.length === 4) {
+      return `${calls.length === 4 ? "Call" : "Put"} Condor`;
+    }
+  }
+
+  return `${legs.length}-Leg ${credit ? "Credit" : "Debit"} Position`;
+}
+
+/**
+ * Ties the legs of one position together. A broker order number is the record of
+ * what was submitted as a single trade, so legs opened in the same order form
+ * the block the journal displays.
+ */
+function assignGroups(trades: MatchedTrade[]): void {
+  const byGroup = new Map<string, MatchedTrade[]>();
+
+  for (const trade of trades) {
+    const key = trade.entryOrder
+      ? `tt-${trade.entryOrder}`
+      : `tt-${trade.symbol.trim()}-${trade.entryTime.getTime()}`;
+    trade.groupId = key;
+    const group = byGroup.get(key) ?? [];
+    group.push(trade);
+    byGroup.set(key, group);
+  }
+
+  byGroup.forEach((group) => {
+    // A partial close splits one leg across several rows, so collapse by
+    // contract first — otherwise a two-leg spread closed in two pieces would
+    // look like a four-leg position.
+    const legs = new Map<string, LegSummary>();
+    for (const trade of group) {
+      const key = `${trade.symbol}|${trade.direction}`;
+      const existing = legs.get(key);
+      if (existing) {
+        existing.quantity += trade.quantity;
+      } else {
+        legs.set(key, {
+          type: trade.type,
+          direction: trade.direction,
+          strike: trade.strikePrice,
+          expiration: trade.expirationDate.getTime(),
+          quantity: trade.quantity,
+        });
+      }
+    }
+
+    const netEntryCash = group.reduce(
+      (sum, trade) =>
+        sum + (trade.direction === "short" ? 1 : -1) * trade.entryPrice * trade.quantity * 100,
+      0,
+    );
+    const strategyType = classifyStrategy(Array.from(legs.values()), netEntryCash);
+    group.forEach((trade) => {
+      trade.strategyType = strategyType;
+    });
+  });
 }
 
 export function parseTastytradeExport(

@@ -36,6 +36,13 @@ export const trades = pgTable("trades", {
   exitReason: text("exit_reason"),
   playbookId: integer("playbook_id"),
   timeClassification: text("time_classification"), // 'Cash Open', 'Euro Close', 'Power Hour', 'Other'
+  // A multi-leg options position is stored as one row per leg, so that each
+  // leg keeps its own strike and P&L. Legs opened together in a single broker
+  // order share a groupId, which is what lets the journal show the position as
+  // one block rather than as unrelated trades.
+  direction: text("direction"), // 'long' or 'short'
+  groupId: text("group_id"),
+  strategyType: text("strategy_type"), // e.g. 'Iron Condor', 'Put Credit Spread'
   tradeDate: timestamp("trade_date").notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
