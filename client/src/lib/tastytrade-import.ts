@@ -555,6 +555,20 @@ export function classifyStrategy(legs: LegSummary[], netEntryCash: number): stri
  * Ties the legs of one position together. A broker order number is the record of
  * what was submitted as a single trade, so legs opened in the same order form
  * the block the journal displays.
+ *
+ * The fill time is deliberately not part of the key. It agrees with the order
+ * number almost always — in a real export no order's legs spanned more than one
+ * timestamp — but it is the weaker signal at both edges. Two unrelated orders
+ * can land within seconds of each other (a five-second gap separated two
+ * different put spreads on different expirations in that same export), so any
+ * tolerance wide enough to absorb a legged fill is also wide enough to fuse
+ * separate positions; and every option expiring on a given day is stamped with
+ * one identical settlement time, which would collapse unrelated expiries into a
+ * single position.
+ *
+ * Where there is no order number to use, an exact timestamp on the same
+ * underlying is the best remaining evidence that legs were submitted together,
+ * so it stands in — matched exactly, never within a tolerance.
  */
 function assignGroups(trades: MatchedTrade[]): void {
   const byGroup = new Map<string, MatchedTrade[]>();
@@ -562,7 +576,7 @@ function assignGroups(trades: MatchedTrade[]): void {
   for (const trade of trades) {
     const key = trade.entryOrder
       ? `tt-${trade.entryOrder}`
-      : `tt-${trade.symbol.trim()}-${trade.entryTime.getTime()}`;
+      : `tt-${trade.ticker}-${trade.entryTime.getTime()}`;
     trade.groupId = key;
     const group = byGroup.get(key) ?? [];
     group.push(trade);
