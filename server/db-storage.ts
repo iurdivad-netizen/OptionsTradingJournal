@@ -53,11 +53,41 @@ export class DbStorage implements IStorage {
     return db;
   }
 
-  /** Adds the starter strategies to a journal that has none yet. */
+  /**
+   * Checks the database actually has the columns this version reads.
+   *
+   * Pulling a change that adds a column without re-running db:push leaves a
+   * database the queries fail against, and the failure is close to invisible:
+   * the strategy list still loads while every trade query returns 500, so the
+   * playbook renders every strategy with no trades rather than an error.
+   */
+  async describeSchemaProblem(): Promise<string | null> {
+    try {
+      await this.database.select().from(trades).limit(1);
+      await this.database.select().from(playbookStrategies).limit(1);
+      return null;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return message;
+    }
+  }
+
+  /**
+   * Gives a journal that has none yet the same starting point as the in-memory
+   * store: the default strategies and an opening account balance. Without the
+   * balance the performance section has no starting equity and the client asks
+   * for a setting that is not there.
+   */
   async seedIfEmpty(): Promise<void> {
     const existing = await this.database.select().from(playbookStrategies).limit(1);
-    if (existing.length > 0) return;
-    await this.database.insert(playbookStrategies).values(DEFAULT_STRATEGIES);
+    if (existing.length === 0) {
+      await this.database.insert(playbookStrategies).values(DEFAULT_STRATEGIES);
+    }
+
+    const balance = await this.getSetting("account_balance");
+    if (!balance) {
+      await this.setSetting("account_balance", "25000");
+    }
   }
 
   // Users

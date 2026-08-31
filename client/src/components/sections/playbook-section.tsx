@@ -43,7 +43,7 @@ export default function PlaybookSection() {
   });
 
   // Fetch trades to calculate strategy performance
-  const { data: trades = [] } = useQuery<Trade[]>({
+  const { data: trades = [], isError: tradesFailed } = useQuery<Trade[]>({
     queryKey: ['/api/trades'],
   });
 
@@ -162,6 +162,19 @@ export default function PlaybookSection() {
 
   return (
     <div className="space-y-6">
+      {tradesFailed && (
+        <Card className="border-red-500 mb-4">
+          <CardContent className="p-4">
+            <p className="font-semibold text-red-600">Trades could not be loaded</p>
+            <p className="text-sm text-muted-foreground">
+              Every strategy below will show no activity. If the app was just updated, its
+              database may need bringing up to date - run <code>npm run db:push</code> and
+              restart.
+            </p>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Current Playbook */}
       <Card>
         <CardHeader>
