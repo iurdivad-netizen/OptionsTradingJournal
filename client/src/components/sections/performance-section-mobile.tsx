@@ -282,6 +282,13 @@ export default function PerformanceSectionMobile() {
   const losingTrades = analytics.completedPositions.filter(t => t.pnl! <= 0);
   const currentBalance = startingBalance + performanceData.totalPnL;
 
+  // The best and worst results are per position: the best leg of a spread is
+  // not a trade anyone made, and on this data it reads as +4,621 off a butterfly
+  // that finished down.
+  const positionResults = analytics.completedPositions.map(position => position.pnl || 0);
+  const bestPosition = positionResults.length > 0 ? Math.max(...positionResults) : 0;
+  const worstPosition = positionResults.length > 0 ? Math.min(...positionResults) : 0;
+
 
   return (
     <div className="w-full max-w-full overflow-hidden space-y-6">
@@ -688,15 +695,15 @@ export default function PerformanceSectionMobile() {
                 </span>
               </div>
               <div className="flex justify-between items-center py-2 border-b">
-                <span className="text-muted-foreground">Best Trade</span>
+                <span className="text-muted-foreground">Best Position</span>
                 <span className="font-medium text-green-600">
-                  ${Math.max(...analytics.completedTrades.map(t => t.pnl || 0)).toFixed(2)}
+                  ${bestPosition.toFixed(2)}
                 </span>
               </div>
               <div className="flex justify-between items-center py-2">
-                <span className="text-muted-foreground">Worst Trade</span>
+                <span className="text-muted-foreground">Worst Position</span>
                 <span className="font-medium text-red-600">
-                  ${Math.min(...analytics.completedTrades.map(t => t.pnl || 0)).toFixed(2)}
+                  ${worstPosition.toFixed(2)}
                 </span>
               </div>
             </div>
