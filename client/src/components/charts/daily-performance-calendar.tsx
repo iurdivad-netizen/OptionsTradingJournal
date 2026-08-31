@@ -1,8 +1,8 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameMonth, isSameDay, startOfWeek, endOfWeek, getWeek, isWithinInterval } from "date-fns";
+import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameMonth, isSameDay, startOfWeek, endOfWeek, getWeek, isWithinInterval, addMonths, subMonths } from "date-fns";
 import { cn } from "@/lib/utils";
-import { ChevronDown, ChevronUp } from "lucide-react";
+import { ChevronDown, ChevronUp, ChevronLeft, ChevronRight } from "lucide-react";
 import { useState } from "react";
 
 interface DailyPnLData {
@@ -19,8 +19,27 @@ interface DailyPerformanceCalendarProps {
 
 export function DailyPerformanceCalendar({ data, className, onDateClick }: DailyPerformanceCalendarProps) {
   const [isExpanded, setIsExpanded] = useState(true);
-  const currentDate = new Date();
-  
+
+  // The month on show. It starts on the most recent month that actually has
+  // trades rather than on today, so a journal whose last import ended weeks ago
+  // does not open on an empty grid.
+  const latestWithData = data.reduce<Date | null>(
+    (latest, item) => (latest === null || item.date > latest ? item.date : latest),
+    null,
+  );
+  const [currentDate, setCurrentDate] = useState<Date>(latestWithData ?? new Date());
+
+  const monthsWithData = Array.from(
+    new Set(data.map((item) => startOfMonth(item.date).getTime())),
+  ).sort((a, b) => a - b);
+  const earliestMonth = monthsWithData.length ? new Date(monthsWithData[0]) : null;
+  const latestMonth = monthsWithData.length
+    ? new Date(monthsWithData[monthsWithData.length - 1])
+    : null;
+
+  const canGoBack = earliestMonth !== null && startOfMonth(currentDate) > earliestMonth;
+  const canGoForward = latestMonth !== null && startOfMonth(currentDate) < latestMonth;
+
 
   const monthStart = startOfMonth(currentDate);
   const monthEnd = endOfMonth(currentDate);
@@ -86,9 +105,29 @@ export function DailyPerformanceCalendar({ data, className, onDateClick }: Daily
     <Card className={className}>
       <CardHeader>
         <div className="flex items-center justify-between">
-          <CardTitle className="text-xl font-semibold">
-            Daily Performance Calendar - {format(currentDate, 'MMMM yyyy')}
-          </CardTitle>
+          <div className="flex items-center gap-1 min-w-0">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setCurrentDate(subMonths(currentDate, 1))}
+              disabled={!canGoBack}
+              aria-label="Previous month"
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </Button>
+            <CardTitle className="text-lg sm:text-xl font-semibold whitespace-nowrap">
+              {format(currentDate, 'MMMM yyyy')}
+            </CardTitle>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setCurrentDate(addMonths(currentDate, 1))}
+              disabled={!canGoForward}
+              aria-label="Next month"
+            >
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+          </div>
           <Button 
             variant="ghost" 
             size="sm" 

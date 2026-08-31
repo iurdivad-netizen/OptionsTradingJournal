@@ -82,6 +82,7 @@ export default function PerformanceSectionMobile() {
         pnlDistribution: {},
         riskRewardData: [],
         monthlyCalendar: {},
+        monthlyBreakdown: [] as { key: string; label: string; pnl: number; total: number; winRate: number }[],
       };
     }
 
@@ -148,16 +149,39 @@ export default function PerformanceSectionMobile() {
       };
     });
 
-    // Monthly calendar data
-    const monthlyCalendar: Record<string, number> = {};
+    // Month by month, newest first. Positions are dated by the day they were
+    // closed, which is the day their result was realised.
+    const byMonth = new Map<string, { label: string; pnl: number; wins: number; total: number }>();
     completedPositions.forEach(trade => {
-      if (trade.exitTime) {
-        const monthKey = new Date(trade.exitTime).toLocaleDateString('en-US', { 
-          year: 'numeric', 
-          month: 'short' 
-        });
-        monthlyCalendar[monthKey] = (monthlyCalendar[monthKey] || 0) + (trade.pnl || 0);
-      }
+      const when = trade.tradeDate ? new Date(trade.tradeDate) : null;
+      if (!when || isNaN(when.getTime())) return;
+      const key = `${when.getFullYear()}-${String(when.getMonth() + 1).padStart(2, '0')}`;
+      const entry = byMonth.get(key) ?? {
+        label: when.toLocaleDateString('en-US', { year: 'numeric', month: 'long' }),
+        pnl: 0,
+        wins: 0,
+        total: 0,
+      };
+      entry.pnl += trade.pnl || 0;
+      entry.total += 1;
+      if ((trade.pnl || 0) > 0) entry.wins += 1;
+      byMonth.set(key, entry);
+    });
+
+    const monthlyBreakdown = Array.from(byMonth.entries())
+      .sort((a, b) => b[0].localeCompare(a[0]))
+      .map(([key, entry]) => ({
+        key,
+        label: entry.label,
+        pnl: entry.pnl,
+        total: entry.total,
+        winRate: entry.total > 0 ? (entry.wins / entry.total) * 100 : 0,
+      }));
+
+    // Kept for the equity curve's month labels.
+    const monthlyCalendar: Record<string, number> = {};
+    monthlyBreakdown.forEach(month => {
+      monthlyCalendar[month.label] = month.pnl;
     });
 
     return {
@@ -170,6 +194,7 @@ export default function PerformanceSectionMobile() {
       pnlDistribution,
       riskRewardData,
       monthlyCalendar,
+      monthlyBreakdown,
     };
   }, [performanceData, allTrades, startingBalance]);
 
@@ -390,6 +415,30 @@ export default function PerformanceSectionMobile() {
           </p>
         )}
       </div>
+
+      {/* Month by month */}
+      {analytics.monthlyBreakdown.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Month by Month</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {analytics.monthlyBreakdown.map((month) => (
+              <div key={month.key} className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="font-medium truncate">{month.label}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {month.total} position{month.total === 1 ? '' : 's'} - {month.winRate.toFixed(0)}% won
+                  </p>
+                </div>
+                <p className={`font-semibold flex-shrink-0 ${month.pnl >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                  {month.pnl >= 0 ? '+' : ''}${month.pnl.toFixed(2)}
+                </p>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
 
       {/* Performance by strategy */}
       {strategyBreakdown.length > 0 && (
