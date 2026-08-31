@@ -254,14 +254,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return acc;
       }, {} as Record<string, number>);
       
-      // Daily P&L
-      const dailyPnL = trades.reduce((acc, trade) => {
-        if (trade.pnl !== null && trade.tradeDate) {
+      // Daily P&L, keyed in date order. Trades are listed newest first, and an
+      // object keeps its keys in insertion order, so building this straight from
+      // that list would hand the client its days backwards.
+      const dailyPnL = [...trades]
+        .filter(trade => trade.pnl !== null && trade.tradeDate)
+        .sort((a, b) => a.tradeDate.getTime() - b.tradeDate.getTime())
+        .reduce((acc, trade) => {
           const date = trade.tradeDate.toDateString();
-          acc[date] = (acc[date] || 0) + trade.pnl;
-        }
-        return acc;
-      }, {} as Record<string, number>);
+          acc[date] = (acc[date] || 0) + trade.pnl!;
+          return acc;
+        }, {} as Record<string, number>);
 
       res.json({
         totalPnL,

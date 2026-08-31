@@ -72,18 +72,28 @@ export default function PerformanceSectionMobile() {
       .filter(position => position.pnl !== null)
       .map(position => ({ ...position.legs[0], pnl: position.pnl as number }));
 
-    // Calculate equity curve
+    // Calculate equity curve. Trades arrive newest first, so they have to be
+    // put back in the order they happened before the balance is accumulated -
+    // otherwise the curve runs backwards through time and the drawdown taken
+    // from it describes a sequence that never occurred.
+    const closedInOrder = completedPositions
+      .filter(trade => trade.exitTime)
+      .sort((a, b) => new Date(a.exitTime!).getTime() - new Date(b.exitTime!).getTime());
+
     let balance = startingBalance;
-    const equityCurve = [{ date: new Date().toISOString(), balance }];
-    
-    completedPositions.forEach(trade => {
-      if (trade.exitTime) {
-        balance += trade.pnl || 0;
-        equityCurve.push({
-          date: trade.exitTime.toString(),
-          balance
-        });
-      }
+    // Seed the curve just before the first trade rather than at today, so the
+    // opening balance is not plotted after every trade that followed it.
+    const openingDate = closedInOrder.length > 0
+      ? new Date(new Date(closedInOrder[0].exitTime!).getTime() - 24 * 60 * 60 * 1000)
+      : new Date();
+    const equityCurve = [{ date: openingDate.toISOString(), balance }];
+
+    closedInOrder.forEach(trade => {
+      balance += trade.pnl || 0;
+      equityCurve.push({
+        date: new Date(trade.exitTime!).toISOString(),
+        balance
+      });
     });
 
     // Calculate drawdown
@@ -155,6 +165,24 @@ export default function PerformanceSectionMobile() {
       </div>
     );
   }
+
+  // How each kind of position has actually done. Imported trades carry the
+  // strategy they were placed as, which makes this the most direct answer to
+  // "which of these is working".
+  const strategyBreakdown = useMemo(() => {
+    const byStrategy = new Map<string, { pnl: number; wins: number; total: number }>();
+    for (const position of analytics.completedPositions) {
+      const name = position.strategyType || 'Unclassified';
+      const entry = byStrategy.get(name) ?? { pnl: 0, wins: 0, total: 0 };
+      entry.pnl += position.pnl ?? 0;
+      entry.total += 1;
+      if ((position.pnl ?? 0) > 0) entry.wins += 1;
+      byStrategy.set(name, entry);
+    }
+    return Array.from(byStrategy.entries())
+      .map(([name, entry]) => ({ name, ...entry, winRate: (entry.wins / entry.total) * 100 }))
+      .sort((a, b) => b.pnl - a.pnl);
+  }, [analytics.completedPositions]);
 
   const winningTrades = analytics.completedPositions.filter(t => t.pnl! > 0);
   const losingTrades = analytics.completedPositions.filter(t => t.pnl! <= 0);
@@ -305,6 +333,30 @@ export default function PerformanceSectionMobile() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Performance by strategy */}
+      {strategyBreakdown.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Performance by Strategy</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {strategyBreakdown.map((strategy) => (
+              <div key={strategy.name} className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="font-medium truncate">{strategy.name}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {strategy.total} position{strategy.total === 1 ? '' : 's'} - {strategy.winRate.toFixed(0)}% won
+                  </p>
+                </div>
+                <p className={`font-semibold flex-shrink-0 ${strategy.pnl >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                  {strategy.pnl >= 0 ? '+' : ''}${strategy.pnl.toFixed(2)}
+                </p>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
 
       {/* Advanced Metrics - Mobile Layout */}
       <div className="grid grid-cols-2 gap-4">

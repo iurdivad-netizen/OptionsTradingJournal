@@ -80,12 +80,18 @@ interface EquityCurveChartProps {
 }
 
 export function EquityCurveChart({ data }: EquityCurveChartProps) {
+  // Guard the axis order here too: a balance curve read right to left is
+  // indistinguishable from a real drawdown.
+  const points = [...data].sort(
+    (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()
+  );
+
   const chartData = {
-    labels: data.map(d => new Date(d.date).toLocaleDateString()),
+    labels: points.map(d => new Date(d.date).toLocaleDateString()),
     datasets: [
       {
         label: 'Account Balance',
-        data: data.map(d => d.balance),
+        data: points.map(d => d.balance),
         borderColor: 'hsl(217, 91%, 60%)',
         backgroundColor: 'hsla(217, 91%, 60%, 0.1)',
         fill: true,
@@ -102,16 +108,24 @@ interface DailyPnLChartProps {
 }
 
 export function DailyPnLChart({ data }: DailyPnLChartProps) {
+  // The keys arrive in whatever order they were inserted, which follows the
+  // order trades were listed rather than the order they happened, so the days
+  // have to be put back into chronological order before plotting.
+  const days = Object.entries(data).sort(
+    ([a], [b]) => new Date(a).getTime() - new Date(b).getTime()
+  );
+  const values = days.map(([, value]) => value);
+
   const chartData = {
-    labels: Object.keys(data).map(date => new Date(date).toLocaleDateString()),
+    labels: days.map(([date]) => new Date(date).toLocaleDateString()),
     datasets: [
       {
         label: 'Daily P&L',
-        data: Object.values(data),
-        backgroundColor: Object.values(data).map(value => 
+        data: values,
+        backgroundColor: values.map(value => 
           value >= 0 ? 'hsl(142, 76%, 36%)' : 'hsl(346, 87%, 43%)'
         ),
-        borderColor: Object.values(data).map(value => 
+        borderColor: values.map(value => 
           value >= 0 ? 'hsl(142, 76%, 36%)' : 'hsl(346, 87%, 43%)'
         ),
         borderWidth: 1,

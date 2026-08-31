@@ -348,6 +348,18 @@ export default function BulkTradeUpload({ onClose, onSuccess }: BulkTradeUploadP
     }));
   }, [tastyResult, tastyTrades, parsedTrades]);
 
+  const detectedStrategies = useMemo(() => {
+    // Counted per position rather than per leg, so a condor reads as one.
+    const seenGroups = new Set<string>();
+    const counts = new Map<string, number>();
+    for (const trade of tastyTrades) {
+      if (!trade.strategyType || seenGroups.has(trade.groupId)) continue;
+      seenGroups.add(trade.groupId);
+      counts.set(trade.strategyType, (counts.get(trade.strategyType) ?? 0) + 1);
+    }
+    return Array.from(counts.entries()).sort((a, b) => b[1] - a[1]);
+  }, [tastyTrades]);
+
   const closedBlockCount = useMemo(
     () => (tastyResult ? new Set(tastyResult.trades.map((trade) => trade.groupId)).size : 0),
     [tastyResult],
@@ -362,6 +374,28 @@ export default function BulkTradeUpload({ onClose, onSuccess }: BulkTradeUploadP
     [tastyResult],
   );
 
+  // Looks up the playbook entry for each detected position type, adding any that
+  // are missing, so an import files its trades under the strategy they actually
+  // are instead of all landing on one default entry.
+  const resolveStrategyIds = async (names: string[]): Promise<Map<string, number>> => {
+    const response = await apiRequest('/api/playbook-strategies', 'GET');
+    const existing = (await response.json()) as { id: number; name: string }[];
+    const byName = new Map(existing.map((strategy) => [strategy.name.toLowerCase(), strategy.id]));
+
+    for (const name of names) {
+      if (byName.has(name.toLowerCase())) continue;
+      const created = await apiRequest('/api/playbook-strategies', 'POST', {
+        name,
+        description: 'Added automatically from an imported broker export.',
+        isDefault: false,
+      });
+      const strategy = (await created.json()) as { id: number };
+      byName.set(name.toLowerCase(), strategy.id);
+    }
+
+    return byName;
+  };
+
   // Upload trades mutation
   const uploadTradesMutation = useMutation({
     mutationFn: async (payloads: TradePayload[]) => {
@@ -369,10 +403,27 @@ export default function BulkTradeUpload({ onClose, onSuccess }: BulkTradeUploadP
       setIsUploading(true);
       setUploadProgress(0);
 
+      const detected = Array.from(
+        new Set(payloads.map((payload) => payload.strategyType).filter((name): name is string => !!name)),
+      );
+      let strategyIds = new Map<string, number>();
+      if (detected.length > 0) {
+        try {
+          strategyIds = await resolveStrategyIds(detected);
+        } catch (error) {
+          // Filing under the right strategy is a convenience; losing it should
+          // not cost the import.
+          console.warn('Could not resolve playbook strategies for this import', error);
+        }
+      }
+
       for (let i = 0; i < payloads.length; i++) {
         const payload = payloads[i];
+        const playbookId = payload.strategyType
+          ? strategyIds.get(payload.strategyType.toLowerCase()) ?? payload.playbookId
+          : payload.playbookId;
         try {
-          const result = await apiRequest('/api/trades', 'POST', payload);
+          const result = await apiRequest('/api/trades', 'POST', { ...payload, playbookId });
           results.push({ success: true, payload, result });
         } catch (error) {
           results.push({ success: false, payload, error });
@@ -390,6 +441,7 @@ export default function BulkTradeUpload({ onClose, onSuccess }: BulkTradeUploadP
       queryClient.invalidateQueries({ queryKey: ['/api/trades'] });
       queryClient.invalidateQueries({ queryKey: ['/api/performance'] });
       queryClient.invalidateQueries({ queryKey: ['/api/performance/analytics'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/playbook-strategies'] });
 
       toast({
         title: "Upload Complete",
@@ -544,6 +596,22 @@ export default function BulkTradeUpload({ onClose, onSuccess }: BulkTradeUploadP
                 Multi-day positions land on this date in the performance calendar.
               </p>
             </div>
+
+            {detectedStrategies.length > 0 && (
+              <div className="space-y-1">
+                <Label>Strategies detected</Label>
+                <div className="flex flex-wrap gap-2">
+                  {detectedStrategies.map(([name, count]) => (
+                    <Badge key={name} variant="outline">
+                      {name} x{count}
+                    </Badge>
+                  ))}
+                </div>
+                <p className="text-sm text-muted-foreground">
+                  Added to your playbook if missing, and each trade filed under its own.
+                </p>
+              </div>
+            )}
 
             {tastyResult.openPositions.length > 0 && (
               <div className="flex items-start gap-2">
