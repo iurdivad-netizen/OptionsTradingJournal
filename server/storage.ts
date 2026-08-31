@@ -156,6 +156,9 @@ export class MemStorage implements IStorage {
       exitReason: "Target reached at 50% gain",
       playbookId: 5, // Short off Put Support strategy
       timeClassification: null,
+      direction: null,
+      groupId: null,
+      strategyType: null,
       tradeDate: today,
       createdAt: new Date(),
     };
@@ -176,6 +179,9 @@ export class MemStorage implements IStorage {
       exitReason: "Stop loss hit",
       playbookId: 5, // Short off Put Support strategy
       timeClassification: null,
+      direction: null,
+      groupId: null,
+      strategyType: null,
       tradeDate: yesterday,
       createdAt: new Date(),
     };
@@ -196,6 +202,9 @@ export class MemStorage implements IStorage {
       exitReason: "Profit target achieved",
       playbookId: 5, // Short off Put Support strategy
       timeClassification: null,
+      direction: null,
+      groupId: null,
+      strategyType: null,
       tradeDate: twoDaysAgo,
       createdAt: new Date(),
     };
@@ -347,6 +356,9 @@ export class MemStorage implements IStorage {
       exitReason: insertTrade.exitReason ?? null,
       playbookId: insertTrade.playbookId ?? null,
       timeClassification,
+      direction: insertTrade.direction ?? null,
+      groupId: insertTrade.groupId ?? null,
+      strategyType: insertTrade.strategyType ?? null,
       createdAt: new Date(),
     };
     this.trades.set(id, trade);

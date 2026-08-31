@@ -12,7 +12,7 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
-import { Plus, ChartLine, Edit, Trash2, Clock, DollarSign, TrendingUp, TrendingDown, Upload } from "lucide-react";
+import { Plus, ChartLine, Edit, Trash2, Clock, DollarSign, TrendingUp, TrendingDown, Upload, ChevronDown, ChevronRight, Layers } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { calculateOptionsPnL, classifyTimeOfDay } from "@/lib/trade-calculations";
@@ -47,6 +47,7 @@ export default function TradesSectionMobile({ onNavigateToAnalysis }: TradesSect
   const [editingTrade, setEditingTrade] = useState<Trade | null>(null);
   const [entrySource, setEntrySource] = useState<"playbook" | "custom">("playbook");
   const [showBulkUpload, setShowBulkUpload] = useState(false);
+  const [expandedBlocks, setExpandedBlocks] = useState<Set<string>>(new Set());
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -315,6 +316,42 @@ export default function TradesSectionMobile({ onNavigateToAnalysis }: TradesSect
   const sortedTrades = [...trades].sort((a, b) => 
     new Date(b.tradeDate).getTime() - new Date(a.tradeDate).getTime()
   );
+
+  // A multi-leg position is stored as one row per leg. Legs that were opened in
+  // the same broker order carry the same groupId, and are shown as a single
+  // block so that a four-leg condor reads as one trade rather than four.
+  const tradeBlocks: { key: string; legs: Trade[] }[] = [];
+  const blockIndex = new Map<string, number>();
+  for (const trade of sortedTrades) {
+    if (!trade.groupId) {
+      tradeBlocks.push({ key: `trade-${trade.id}`, legs: [trade] });
+      continue;
+    }
+    const existing = blockIndex.get(trade.groupId);
+    if (existing === undefined) {
+      blockIndex.set(trade.groupId, tradeBlocks.length);
+      tradeBlocks.push({ key: trade.groupId, legs: [trade] });
+    } else {
+      tradeBlocks[existing].legs.push(trade);
+    }
+  }
+
+  const toggleBlock = (key: string) => {
+    setExpandedBlocks((current) => {
+      const next = new Set(current);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  };
+
+  const describeLeg = (leg: Trade) =>
+    `${leg.direction === "short" ? "Short" : leg.direction === "long" ? "Long" : ""} ${leg.strikePrice} ${
+      leg.type === "calls" ? "C" : "P"
+    }`.trim();
 
   return (
     <div className="w-full max-w-full overflow-hidden">
@@ -706,12 +743,153 @@ export default function TradesSectionMobile({ onNavigateToAnalysis }: TradesSect
           </Card>
         ) : (
           <div className="space-y-3">
-            {sortedTrades.map((trade) => {
+            {tradeBlocks.map((block) => {
+              const firstLeg = block.legs[0];
+              const isMultiLeg = block.legs.length > 1;
+              const isExpanded = expandedBlocks.has(block.key);
+              const blockPnl = block.legs.reduce((sum, leg) => sum + (leg.pnl || 0), 0);
+              const blockOpen = block.legs.some((leg) => leg.exitPrice === null);
+              const blockStrategy = strategies.find(s => s.id === firstLeg.playbookId);
+
+              if (isMultiLeg) {
+                return (
+                  <Card key={block.key} className="w-full">
+                    <CardContent className="p-4">
+                      <div className="space-y-3">
+                        {/* Position header */}
+                        <div className="flex items-center justify-between gap-2">
+                          <button
+                            type="button"
+                            onClick={() => toggleBlock(block.key)}
+                            className="flex items-center gap-2 min-w-0 text-left"
+                          >
+                            {isExpanded
+                              ? <ChevronDown className="w-4 h-4 flex-shrink-0" />
+                              : <ChevronRight className="w-4 h-4 flex-shrink-0" />}
+                            <span className="font-semibold text-lg">{firstLeg.ticker}</span>
+                            <Badge variant="outline" className="flex items-center gap-1">
+                              <Layers className="w-3 h-3" />
+                              {firstLeg.strategyType || `${block.legs.length} legs`}
+                            </Badge>
+                          </button>
+                          {!blockOpen && (
+                            <div className={`flex items-center gap-1 flex-shrink-0 ${blockPnl >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                              {blockPnl >= 0 ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
+                              <span className="font-semibold">
+                                {blockPnl >= 0 ? '+' : ''}${blockPnl.toFixed(2)}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Legs at a glance */}
+                        <div className="text-sm text-muted-foreground">
+                          {block.legs.map(describeLeg).join('  /  ')}
+                        </div>
+
+                        <div className="flex items-center gap-4 text-sm text-muted-foreground">
+                          <div className="flex items-center gap-1">
+                            <Clock className="w-3 h-3" />
+                            <span>{format(new Date(firstLeg.tradeDate), 'MMM dd')}</span>
+                          </div>
+                          <div>
+                            {format(new Date(firstLeg.entryTime), 'HH:mm')}
+                            {firstLeg.exitTime && (
+                              <> - {format(new Date(firstLeg.exitTime), 'HH:mm')}</>
+                            )}
+                          </div>
+                          <div>{block.legs.length} legs{blockOpen ? ' - still open' : ''}</div>
+                        </div>
+
+                        {blockStrategy && (
+                          <div className="text-sm">
+                            <span className="text-muted-foreground">Strategy: </span>
+                            <span className="font-medium">{blockStrategy.name}</span>
+                          </div>
+                        )}
+
+                        {!isExpanded && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => toggleBlock(block.key)}
+                            className="w-full"
+                          >
+                            Show {block.legs.length} legs
+                          </Button>
+                        )}
+
+                        {/* Individual legs */}
+                        {isExpanded && (
+                          <div className="space-y-2 border-t pt-3">
+                            {block.legs.map((leg) => {
+                              const legPnl = leg.pnl || 0;
+                              return (
+                                <div key={leg.id} className="rounded-md border p-3">
+                                  <div className="flex items-center justify-between gap-2">
+                                    <div className="flex items-center gap-2 min-w-0">
+                                      <Badge variant={leg.type === 'calls' ? 'default' : 'secondary'}>
+                                        {describeLeg(leg)}
+                                      </Badge>
+                                      <span className="text-sm text-muted-foreground">x{leg.quantity}</span>
+                                    </div>
+                                    <div className="flex items-center gap-1 flex-shrink-0">
+                                      {leg.exitPrice !== null && (
+                                        <span className={`text-sm font-medium ${legPnl >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                          {legPnl >= 0 ? '+' : ''}${legPnl.toFixed(2)}
+                                        </span>
+                                      )}
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={() => handleEditTrade(leg)}
+                                        className="text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+                                      >
+                                        <Edit className="w-4 h-4" />
+                                      </Button>
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={() => deleteTradeMutation.mutate(leg.id)}
+                                        disabled={deleteTradeMutation.isPending}
+                                        className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                                      >
+                                        <Trash2 className="w-4 h-4" />
+                                      </Button>
+                                    </div>
+                                  </div>
+                                  <div className="mt-2 text-sm text-muted-foreground">
+                                    Entry ${leg.entryPrice}
+                                    {leg.exitPrice !== null && <> - Exit ${leg.exitPrice}</>}
+                                  </div>
+                                  {onNavigateToAnalysis && (
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      onClick={() => onNavigateToAnalysis(leg.id, 'analysis')}
+                                      className="w-full mt-2"
+                                    >
+                                      <ChartLine className="w-4 h-4 mr-2" />
+                                      Analyze Leg
+                                    </Button>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    </CardContent>
+                  </Card>
+                );
+              }
+
+              const trade = firstLeg;
               const strategy = strategies.find(s => s.id === trade.playbookId);
               const pnl = trade.pnl || 0;
-              
+
               return (
-                <Card key={trade.id} className="w-full">
+                <Card key={block.key} className="w-full">
                   <CardContent className="p-4">
                     <div className="space-y-3">
                       {/* Header Row */}
