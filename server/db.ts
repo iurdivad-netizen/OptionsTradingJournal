@@ -1,15 +1,22 @@
-import { Pool, neonConfig } from '@neondatabase/serverless';
-import { drizzle } from 'drizzle-orm/neon-serverless';
-import ws from "ws";
+import { Pool } from "pg";
+import { drizzle } from "drizzle-orm/node-postgres";
 import * as schema from "@shared/schema";
 
-neonConfig.webSocketConstructor = ws;
+// node-postgres rather than the Neon serverless driver, so the same build talks
+// to a plain PostgreSQL server (what DEPLOYMENT_GUIDE.md sets up) as well as a
+// hosted one over TCP.
+//
+// The connection is optional: with no DATABASE_URL the app falls back to
+// in-memory storage, so it still runs out of the box with nothing to configure.
+export const databaseUrl = process.env.DATABASE_URL;
 
-if (!process.env.DATABASE_URL) {
-  throw new Error(
-    "DATABASE_URL must be set. Did you forget to provision a database?",
-  );
-}
+export const pool = databaseUrl
+  ? new Pool({
+      connectionString: databaseUrl,
+      // Hosted providers generally require TLS; a local server generally has
+      // none, and rejecting its self-signed certificate would block startup.
+      ssl: /localhost|127\.0\.0\.1/.test(databaseUrl) ? false : { rejectUnauthorized: false },
+    })
+  : null;
 
-export const pool = new Pool({ connectionString: process.env.DATABASE_URL });
-export const db = drizzle({ client: pool, schema });
+export const db = pool ? drizzle(pool, { schema }) : null;

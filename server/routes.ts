@@ -223,7 +223,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Performance Analytics route
   app.get("/api/performance/analytics", async (req, res) => {
     try {
-      const trades = await storage.getTrades();
+      const stored = await storage.getTrades();
+
+      // Results can be read gross, before the commissions and fees that are
+      // already netted into each trade's P&L, so their drag is visible.
+      const gross = req.query.basis === "gross";
+      const trades = gross
+        ? stored.map(trade => ({
+            ...trade,
+            pnl: trade.pnl === null ? null : trade.pnl - (trade.fees ?? 0),
+          }))
+        : stored;
       
       // Calculate performance metrics. Win rate and the averages are counted
       // per position, so a four-leg condor is one win or one loss rather than
@@ -274,6 +284,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         avgLoss,
         totalTrades,
         totalLegs: trades.length,
+        basis: gross ? "gross" : "net",
+        totalFees: stored.reduce((sum, trade) => sum + (trade.fees ?? 0), 0),
         winningPositions: stats.wins,
         losingPositions: stats.losses,
         completedPositions: stats.completed,
