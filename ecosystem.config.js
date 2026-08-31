@@ -1,7 +1,7 @@
 module.exports = {
   apps: [{
     name: 'trading-dashboard',
-    script: 'server/index.js',
+    script: 'dist/index.js',
     env: {
       NODE_ENV: 'development'
     },

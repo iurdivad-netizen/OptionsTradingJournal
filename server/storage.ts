@@ -309,9 +309,13 @@ export class MemStorage implements IStorage {
   async createTrade(insertTrade: InsertTrade): Promise<Trade> {
     const id = this.currentTradeId++;
     
-    // Calculate P&L if both entry and exit prices are provided
+    // Calculate P&L from the prices only when the caller did not supply one.
+    // This calculation assumes a long position and ignores fees, so it would be
+    // wrong for a trade whose P&L is already known: a short leg profits when the
+    // price falls, and an importer reading a broker log knows both the direction
+    // and the commissions actually charged.
     let calculatedPnL = insertTrade.pnl ?? null;
-    if (insertTrade.exitPrice && insertTrade.entryPrice) {
+    if (calculatedPnL === null && insertTrade.exitPrice != null && insertTrade.entryPrice != null) {
       const priceDiff = insertTrade.exitPrice - insertTrade.entryPrice;
       calculatedPnL = priceDiff * insertTrade.quantity * 100; // Options are in contracts of 100
     }
@@ -355,9 +359,18 @@ export class MemStorage implements IStorage {
     
     const mergedTrade = { ...existingTrade, ...updateData };
     
-    // Recalculate P&L if entry or exit price changed
+    // Recalculate P&L only when a price actually changed and the caller did not
+    // supply one, so that editing an unrelated field cannot overwrite a P&L that
+    // already accounts for direction and fees.
     let calculatedPnL = mergedTrade.pnl;
-    if (mergedTrade.exitPrice && mergedTrade.entryPrice) {
+    const priceChanged =
+      updateData.entryPrice !== undefined || updateData.exitPrice !== undefined;
+    if (
+      updateData.pnl === undefined &&
+      priceChanged &&
+      mergedTrade.exitPrice != null &&
+      mergedTrade.entryPrice != null
+    ) {
       const priceDiff = mergedTrade.exitPrice - mergedTrade.entryPrice;
       calculatedPnL = priceDiff * mergedTrade.quantity * 100; // Options are in contracts of 100
     }
