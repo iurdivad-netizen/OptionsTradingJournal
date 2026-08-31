@@ -1,6 +1,7 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { DollarSign, Percent, TrendingUp, BarChart3, Target, Activity, Calendar, Award } from "lucide-react";
 import {
@@ -27,18 +28,40 @@ interface PerformanceData {
   timePerformance: Record<string, number>;
   dailyPnL: Record<string, number>;
   trades: Trade[];
+  totalFees?: number;
+  basis?: 'net' | 'gross';
 }
 
 export default function PerformanceSectionMobile() {
+  // Net counts the commissions and fees already deducted from each trade;
+  // gross shows what the same trades made before that drag.
+  const [basis, setBasis] = useState<'net' | 'gross'>('net');
+
   // Fetch performance data
   const { data: performanceData, isLoading } = useQuery<PerformanceData>({
-    queryKey: ['/api/performance/analytics'],
+    queryKey: ['/api/performance/analytics', basis],
+    queryFn: () =>
+      fetch(`/api/performance/analytics?basis=${basis}`, { credentials: 'include' })
+        .then(res => res.json()),
   });
 
   // Fetch all trades
-  const { data: allTrades = [] } = useQuery<Trade[]>({
+  const { data: storedTrades = [] } = useQuery<Trade[]>({
     queryKey: ['/api/trades'],
   });
+
+  // Everything below works from the chosen basis, so the charts, streaks and
+  // strategy breakdown agree with the headline figures.
+  const allTrades = useMemo(
+    () =>
+      basis === 'net'
+        ? storedTrades
+        : storedTrades.map(trade => ({
+            ...trade,
+            pnl: trade.pnl === null ? null : trade.pnl - (trade.fees ?? 0),
+          })),
+    [storedTrades, basis],
+  );
 
   // Fetch account balance
   const { data: accountBalanceData } = useQuery<{value: string}>({
@@ -332,6 +355,36 @@ export default function PerformanceSectionMobile() {
             </div>
           </CardContent>
         </Card>
+      </div>
+
+      {/* Net / gross toggle */}
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex gap-2">
+          <Button
+            type="button"
+            size="sm"
+            variant={basis === 'net' ? 'default' : 'outline'}
+            onClick={() => setBasis('net')}
+          >
+            After fees
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant={basis === 'gross' ? 'default' : 'outline'}
+            onClick={() => setBasis('gross')}
+          >
+            Before fees
+          </Button>
+        </div>
+        {typeof performanceData.totalFees === 'number' && performanceData.totalFees !== 0 && (
+          <p className="text-sm text-muted-foreground">
+            Commissions, fees and assignment costs:{' '}
+            <span className="font-medium text-foreground">
+              ${Math.abs(performanceData.totalFees).toFixed(2)}
+            </span>
+          </p>
+        )}
       </div>
 
       {/* Performance by strategy */}

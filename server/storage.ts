@@ -1,3 +1,5 @@
+import { databaseUrl } from "./db";
+import { DbStorage } from "./db-storage";
 import {
   trades,
   premarketAnalysis,
@@ -156,6 +158,7 @@ export class MemStorage implements IStorage {
       exitReason: "Target reached at 50% gain",
       playbookId: 5, // Short off Put Support strategy
       timeClassification: null,
+      fees: null,
       direction: null,
       groupId: null,
       strategyType: null,
@@ -179,6 +182,7 @@ export class MemStorage implements IStorage {
       exitReason: "Stop loss hit",
       playbookId: 5, // Short off Put Support strategy
       timeClassification: null,
+      fees: null,
       direction: null,
       groupId: null,
       strategyType: null,
@@ -202,6 +206,7 @@ export class MemStorage implements IStorage {
       exitReason: "Profit target achieved",
       playbookId: 5, // Short off Put Support strategy
       timeClassification: null,
+      fees: null,
       direction: null,
       groupId: null,
       strategyType: null,
@@ -356,6 +361,7 @@ export class MemStorage implements IStorage {
       exitReason: insertTrade.exitReason ?? null,
       playbookId: insertTrade.playbookId ?? null,
       timeClassification,
+      fees: insertTrade.fees ?? null,
       direction: insertTrade.direction ?? null,
       groupId: insertTrade.groupId ?? null,
       strategyType: insertTrade.strategyType ?? null,
@@ -638,4 +644,9 @@ export class MemStorage implements IStorage {
   }
 }
 
-export const storage = new MemStorage();
+// PostgreSQL when DATABASE_URL is set, otherwise an in-memory store so the app
+// still runs with no configuration — at the cost of losing everything on
+// restart, which is why a real database is worth configuring.
+export const storage: IStorage = databaseUrl ? new DbStorage() : new MemStorage();
+
+export const storageIsPersistent = Boolean(databaseUrl);

@@ -32,6 +32,9 @@ export const trades = pgTable("trades", {
   strikePrice: real("strike_price").notNull(),
   expirationDate: timestamp("expiration_date").notNull(),
   pnl: real("pnl"),
+  // Commissions and exchange/assignment fees already included in pnl, kept
+  // separately so results can be shown gross as well as net.
+  fees: real("fees"),
   entryReason: text("entry_reason"),
   exitReason: text("exit_reason"),
   playbookId: integer("playbook_id"),

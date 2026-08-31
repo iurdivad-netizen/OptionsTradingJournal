@@ -2,6 +2,8 @@ import "dotenv/config";
 import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
+import { storage, storageIsPersistent } from "./storage";
+import { DbStorage } from "./db-storage";
 
 const app = express();
 app.use(express.json());
@@ -38,6 +40,13 @@ app.use((req, res, next) => {
 });
 
 (async () => {
+  if (storageIsPersistent) {
+    await (storage as DbStorage).seedIfEmpty();
+    log("using PostgreSQL storage");
+  } else {
+    log("DATABASE_URL is not set - using in-memory storage, data will not survive a restart");
+  }
+
   const server = await registerRoutes(app);
 
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
