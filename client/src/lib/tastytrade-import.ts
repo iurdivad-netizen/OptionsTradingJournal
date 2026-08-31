@@ -320,9 +320,13 @@ function buildTrade(
     exitTime,
     expirationDate: lot.row.expiration,
     tradeDate: dateOnly(basis === "entry" || !exitTime ? entryTime : exitTime),
-    pnl: netPnl === null ? null : round(netPnl),
-    grossPnl: grossPnl === null ? null : round(grossPnl),
-    fees: netPnl === null || grossPnl === null ? 0 : round(netPnl - grossPnl),
+    // Kept at full precision rather than rounded to cents here: a row's Total is
+    // divided by its quantity to prorate a partial close, and rounding each of
+    // those shares drifted the imported total four cents away from the account
+    // over one export. Amounts are rounded where they are displayed.
+    pnl: netPnl,
+    grossPnl,
+    fees: netPnl === null || grossPnl === null ? 0 : netPnl - grossPnl,
     symbol: lot.row.symbol,
     entryOrder: lot.row.orderNo,
     exitOrder: close ? close.orderNo : "",
@@ -331,10 +335,6 @@ function buildTrade(
     groupId: "",
     strategyType: "",
   };
-}
-
-function round(value: number): number {
-  return Math.round(value * 100) / 100;
 }
 
 function describeContract(row: TastytradeRow): string {
@@ -552,6 +552,70 @@ export function classifyStrategy(legs: LegSummary[], netEntryCash: number): stri
 }
 
 /**
+ * Folds rolls back into the position they adjust.
+ *
+ * A roll arrives as one order that closes a leg and opens its replacement.
+ * Keyed on the opening order alone every roll looks like a brand new position,
+ * so an iron butterfly rolled five times is filed as one butterfly plus two
+ * straddles, two long calls and a long put: six positions where one was traded,
+ * with its result scattered across them.
+ *
+ * The replacement legs therefore join the group of the legs they replaced. The
+ * position has to outlive the order for that to apply — closing one outright
+ * and opening another in the same submission starts a new position rather than
+ * adjusting the old one, and without that condition such an order would chain
+ * the two together permanently.
+ */
+function linkRolls(trades: MatchedTrade[]): void {
+  const closedByOrder = new Map<string, MatchedTrade[]>();
+  const openedByOrder = new Map<string, MatchedTrade[]>();
+
+  for (const trade of trades) {
+    if (trade.exitOrder) {
+      const closed = closedByOrder.get(trade.exitOrder) ?? [];
+      closed.push(trade);
+      closedByOrder.set(trade.exitOrder, closed);
+    }
+    if (trade.entryOrder) {
+      const opened = openedByOrder.get(trade.entryOrder) ?? [];
+      opened.push(trade);
+      openedByOrder.set(trade.entryOrder, opened);
+    }
+  }
+
+  // Oldest first, so a chain of rolls carries the original group all the way
+  // forward instead of stopping at the first replacement.
+  const rollOrders = Array.from(openedByOrder.keys())
+    .filter((order) => closedByOrder.has(order))
+    .sort(
+      (a, b) =>
+        openedByOrder.get(a)![0].entryTime.getTime() -
+        openedByOrder.get(b)![0].entryTime.getTime(),
+    );
+
+  for (const order of rollOrders) {
+    const opened = openedByOrder.get(order)!;
+    const closed = closedByOrder.get(order)!;
+    const target = closed[0].groupId;
+    const when = opened[0].entryTime.getTime();
+
+    if (!target || opened.some((trade) => trade.groupId === target)) continue;
+
+    const closedHere = new Set(closed);
+    const positionSurvives = trades.some(
+      (trade) =>
+        trade.groupId === target &&
+        !closedHere.has(trade) &&
+        trade.entryTime.getTime() <= when &&
+        (trade.exitTime === null || trade.exitTime.getTime() > when),
+    );
+    if (!positionSurvives) continue;
+
+    for (const trade of opened) trade.groupId = target;
+  }
+}
+
+/**
  * Ties the legs of one position together. A broker order number is the record of
  * what was submitted as a single trade, so legs opened in the same order form
  * the block the journal displays.
@@ -571,24 +635,37 @@ export function classifyStrategy(legs: LegSummary[], netEntryCash: number): stri
  * so it stands in — matched exactly, never within a tolerance.
  */
 function assignGroups(trades: MatchedTrade[]): void {
-  const byGroup = new Map<string, MatchedTrade[]>();
-
   for (const trade of trades) {
-    const key = trade.entryOrder
+    trade.groupId = trade.entryOrder
       ? `tt-${trade.entryOrder}`
       : `tt-${trade.ticker}-${trade.entryTime.getTime()}`;
-    trade.groupId = key;
-    const group = byGroup.get(key) ?? [];
+  }
+
+  linkRolls(trades);
+
+  const byGroup = new Map<string, MatchedTrade[]>();
+  for (const trade of trades) {
+    const group = byGroup.get(trade.groupId) ?? [];
     group.push(trade);
-    byGroup.set(key, group);
+    byGroup.set(trade.groupId, group);
   }
 
   byGroup.forEach((group) => {
     // A partial close splits one leg across several rows, so collapse by
     // contract first — otherwise a two-leg spread closed in two pieces would
     // look like a four-leg position.
+    // Classify the position by the shape it was opened in. A roll replaces a
+    // leg rather than enlarging the position, so counting every leg the group
+    // ever held would turn a butterfly rolled five times into an eleven-leg
+    // shape it never had.
+    const opening = group.reduce(
+      (earliest, trade) => (trade.entryTime < earliest.entryTime ? trade : earliest),
+      group[0],
+    );
+    const shape = group.filter((trade) => trade.entryOrder === opening.entryOrder);
+
     const legs = new Map<string, LegSummary>();
-    for (const trade of group) {
+    for (const trade of shape) {
       const key = `${trade.symbol}|${trade.direction}`;
       const existing = legs.get(key);
       if (existing) {
@@ -604,7 +681,7 @@ function assignGroups(trades: MatchedTrade[]): void {
       }
     }
 
-    const netEntryCash = group.reduce(
+    const netEntryCash = shape.reduce(
       (sum, trade) =>
         sum + (trade.direction === "short" ? 1 : -1) * trade.entryPrice * trade.quantity * 100,
       0,
