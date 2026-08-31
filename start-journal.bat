@@ -33,24 +33,33 @@ if !NODEMAJOR! LSS 20 (
 for /f %%v in ('node -p "process.versions.node"') do echo Using Node.js %%v
 echo.
 
-REM ---- Install dependencies -------------------------------------------------
-if not exist "node_modules\" (
-  echo [1/3] Installing dependencies. The first run takes a few minutes...
-  call npm install
-  if errorlevel 1 goto failed
-) else (
-  echo [1/3] Dependencies already installed - skipping.
+REM ---- Pull the latest code, if this is a git checkout ----------------------
+where git >nul 2>nul
+if not errorlevel 1 (
+  if exist ".git\" (
+    echo [1/4] Checking for updates...
+    call git pull --ff-only
+    if errorlevel 1 echo       Could not update automatically - carrying on with the current code.
+    echo.
+  )
 )
+
+REM ---- Install dependencies -------------------------------------------------
+REM Always run this: an update can add a new dependency, and npm install is a
+REM fast no-op when everything is already present.
+echo [2/4] Checking dependencies. The first run takes a few minutes...
+call npm install
+if errorlevel 1 goto failed
 echo.
 
 REM ---- Build ----------------------------------------------------------------
-echo [2/3] Building the app...
+echo [3/4] Building the app...
 call npm run build
 if errorlevel 1 goto failed
 echo.
 
 REM ---- Start ----------------------------------------------------------------
-echo [3/3] Starting the server on http://localhost:5000
+echo [4/4] Starting the server on http://localhost:5000
 echo.
 echo     Log in with the username and password from your .env file,
 echo     or the defaults in .env.example if you have not made one.
