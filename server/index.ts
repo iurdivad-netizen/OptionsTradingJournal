@@ -41,8 +41,18 @@ app.use((req, res, next) => {
 
 (async () => {
   if (storageIsPersistent) {
-    await (storage as DbStorage).seedIfEmpty();
-    log("using PostgreSQL storage");
+    const schemaProblem = await (storage as DbStorage).describeSchemaProblem();
+    if (schemaProblem) {
+      log("=".repeat(70));
+      log("The database does not match what this version of the app expects.");
+      log(`  ${schemaProblem}`);
+      log("Run 'npm run db:push' to bring it up to date, then start again.");
+      log("Until then, anything reading trades will fail.");
+      log("=".repeat(70));
+    } else {
+      await (storage as DbStorage).seedIfEmpty();
+      log("using PostgreSQL storage");
+    }
   } else {
     log("DATABASE_URL is not set - using in-memory storage, data will not survive a restart");
   }

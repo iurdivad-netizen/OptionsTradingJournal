@@ -20,12 +20,13 @@ import {
 } from "lucide-react";
 import { format } from "date-fns";
 import type { Trade, PremarketAnalysis, TradeAnalysis, IntradayNote } from "@shared/schema";
+import { groupIntoPositions, summarisePositions } from "@shared/positions";
 
 export default function DailySnapshotSection() {
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
 
   // Fetch all data for the selected date
-  const { data: trades = [] } = useQuery<Trade[]>({
+  const { data: trades = [], isError: tradesFailed } = useQuery<Trade[]>({
     queryKey: ['/api/trades'],
   });
 
@@ -85,17 +86,37 @@ export default function DailySnapshotSection() {
     }
   });
 
-  // Calculate daily stats
+  // Calculate daily stats. A multi-leg position is stored one row per leg, so
+  // the counts and the win rate work from positions - counting rows would
+  // report a day of three iron butterflies as twelve trades, at a win rate
+  // dragged toward 50% by the losing leg every spread necessarily has. The P&L
+  // adds up the legs, which comes to the same total.
+  const positionsOnDate = groupIntoPositions(tradesOnDate);
+  const stats = summarisePositions(positionsOnDate);
   const dailyPnL = tradesOnDate.reduce((sum, trade) => sum + (trade.pnl || 0), 0);
-  const winningTrades = tradesOnDate.filter(trade => (trade.pnl || 0) > 0).length;
-  const losingTrades = tradesOnDate.filter(trade => (trade.pnl || 0) < 0).length;
-  const winRate = tradesOnDate.length > 0 ? (winningTrades / tradesOnDate.length) * 100 : 0;
+  const winningTrades = stats.wins;
+  const losingTrades = stats.losses;
+  const winRate = stats.winRate;
+  const tradeCount = positionsOnDate.length;
 
   // Check if there's any data for the selected date
   const hasAnyData = tradesOnDate.length > 0 || premarketOnDate || analysesOnDate.length > 0 || notesOnDate.length > 0;
 
   return (
     <div className="space-y-6">
+      {tradesFailed && (
+        <Card className="border-red-500">
+          <CardContent className="p-4">
+            <p className="font-semibold text-red-600">Trades could not be loaded</p>
+            <p className="text-sm text-muted-foreground">
+              The figures below are not your results. If the app was just updated, its
+              database may need bringing up to date - run <code>npm run db:push</code> and
+              restart.
+            </p>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Date Selector */}
       <Card>
         <CardHeader>
@@ -128,7 +149,7 @@ export default function DailySnapshotSection() {
                 {dailyPnL >= 0 ? '+' : ''}${dailyPnL.toFixed(2)} P&L
               </Badge>
               <Badge variant="secondary">
-                {tradesOnDate.length} trades
+                {tradeCount} {tradeCount === 1 ? 'trade' : 'trades'}
               </Badge>
               <Badge variant="outline">
                 {winRate.toFixed(1)}% win rate
@@ -179,7 +200,7 @@ export default function DailySnapshotSection() {
             <div className="flex items-center space-x-2">
               <Activity className="w-5 h-5 text-blue-500" />
               <div>
-                <p className="text-2xl font-bold">{tradesOnDate.length}</p>
+                <p className="text-2xl font-bold">{tradeCount}</p>
                 <p className="text-xs text-muted-foreground">Total Trades</p>
               </div>
             </div>

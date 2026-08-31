@@ -173,22 +173,9 @@ export default function PerformanceSectionMobile() {
     };
   }, [performanceData, allTrades, startingBalance]);
 
-  if (isLoading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="text-muted-foreground">Loading performance data...</div>
-      </div>
-    );
-  }
-
-  if (!performanceData) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="text-muted-foreground">No performance data available</div>
-      </div>
-    );
-  }
-
+  // Every hook has to run on every render, so these stay above the early
+  // returns below. Placed after them, the render that follows loading runs
+  // more hooks than the one before it and React tears the section down.
   // How each kind of position has actually done. Imported trades carry the
   // strategy they were placed as, which makes this the most direct answer to
   // "which of these is working".
@@ -206,10 +193,6 @@ export default function PerformanceSectionMobile() {
       .map(([name, entry]) => ({ name, ...entry, winRate: (entry.wins / entry.total) * 100 }))
       .sort((a, b) => b.pnl - a.pnl);
   }, [analytics.completedPositions]);
-
-  const winningTrades = analytics.completedPositions.filter(t => t.pnl! > 0);
-  const losingTrades = analytics.completedPositions.filter(t => t.pnl! <= 0);
-  const currentBalance = startingBalance + performanceData.totalPnL;
 
   // Convert daily P&L data for heatmap
   const heatmapData = useMemo(() => {
@@ -251,6 +234,27 @@ export default function PerformanceSectionMobile() {
 
     return result;
   }, [performanceData?.dailyPnL, allTrades]);
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-muted-foreground">Loading performance data...</div>
+      </div>
+    );
+  }
+
+  if (!performanceData) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-muted-foreground">No performance data available</div>
+      </div>
+    );
+  }
+
+  const winningTrades = analytics.completedPositions.filter(t => t.pnl! > 0);
+  const losingTrades = analytics.completedPositions.filter(t => t.pnl! <= 0);
+  const currentBalance = startingBalance + performanceData.totalPnL;
+
 
   return (
     <div className="w-full max-w-full overflow-hidden space-y-6">
