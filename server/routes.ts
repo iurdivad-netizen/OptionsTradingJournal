@@ -1,6 +1,7 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
+import { statsFromLegs } from "@shared/positions";
 import { getSession, authenticate, login, logout, getUser } from "./auth";
 import { insertTradeSchema, insertPremarketAnalysisSchema, insertTradeAnalysisSchema, insertPlaybookStrategySchema, insertIntradayNoteSchema } from "@shared/schema";
 
@@ -224,19 +225,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const trades = await storage.getTrades();
       
-      // Calculate performance metrics
-      const totalTrades = trades.length;
+      // Calculate performance metrics. Win rate and the averages are counted
+      // per position, so a four-leg condor is one win or one loss rather than
+      // two of each; the money totals stay on legs, which sum to the same figure.
       const completedTrades = trades.filter(t => t.pnl !== null);
-      const winningTrades = completedTrades.filter(t => t.pnl! > 0);
-      const losingTrades = completedTrades.filter(t => t.pnl! <= 0);
-      
+      const stats = statsFromLegs(trades);
+
+      const totalTrades = stats.positions;
       const totalPnL = completedTrades.reduce((sum, t) => sum + (t.pnl || 0), 0);
-      const winRate = completedTrades.length > 0 ? (winningTrades.length / completedTrades.length) * 100 : 0;
-      
-      // Calculate average R:R (simplified)
-      const avgWin = winningTrades.length > 0 ? winningTrades.reduce((sum, t) => sum + t.pnl!, 0) / winningTrades.length : 0;
-      const avgLoss = losingTrades.length > 0 ? Math.abs(losingTrades.reduce((sum, t) => sum + t.pnl!, 0) / losingTrades.length) : 0;
-      const avgRR = avgLoss > 0 ? avgWin / avgLoss : 0;
+      const winRate = stats.winRate;
+      const avgWin = stats.avgWin;
+      const avgLoss = stats.avgLoss;
+      const avgRR = stats.avgRR;
       
       // Performance by symbol
       const symbolPerformance = trades.reduce((acc, trade) => {
@@ -267,7 +267,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         totalPnL,
         winRate,
         avgRR,
+        avgWin,
+        avgLoss,
         totalTrades,
+        totalLegs: trades.length,
+        winningPositions: stats.wins,
+        losingPositions: stats.losses,
+        completedPositions: stats.completed,
         symbolPerformance,
         timePerformance,
         dailyPnL,
@@ -444,13 +450,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const analyses = await storage.getTradeAnalyses();
       
       // Calculate performance metrics
-      const totalTrades = trades.length;
-      const winningTrades = trades.filter(t => (t.pnl || 0) > 0).length;
-      const losingTrades = trades.filter(t => (t.pnl || 0) < 0).length;
+      // Counted per position rather than per leg, so a spread reports as the
+      // one trade it was rather than as several.
+      const stats = statsFromLegs(trades);
+      const totalTrades = stats.positions;
+      const winningTrades = stats.wins;
+      const losingTrades = stats.losses;
       const totalPnL = trades.reduce((sum, t) => sum + (t.pnl || 0), 0);
-      const winRate = totalTrades > 0 ? (winningTrades / totalTrades * 100).toFixed(1) : "0";
-      const avgWin = winningTrades > 0 ? (trades.filter(t => (t.pnl || 0) > 0).reduce((sum, t) => sum + (t.pnl || 0), 0) / winningTrades).toFixed(2) : "0";
-      const avgLoss = losingTrades > 0 ? (trades.filter(t => (t.pnl || 0) < 0).reduce((sum, t) => sum + (t.pnl || 0), 0) / losingTrades).toFixed(2) : "0";
+      const winRate = stats.completed > 0 ? stats.winRate.toFixed(1) : "0";
+      const avgWin = stats.avgWin.toFixed(2);
+      const avgLoss = (-stats.avgLoss).toFixed(2);
       
       const report = {
         reportDate: new Date().toISOString(),

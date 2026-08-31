@@ -16,6 +16,7 @@ import {
 import { DailyPerformanceCalendar } from "@/components/charts/daily-performance-calendar";
 import { calculateDrawdown, calculateSharpeRatio, getStreakAnalysis } from "@/lib/trade-calculations";
 import type { Trade } from "@shared/schema";
+import { groupIntoPositions } from "@shared/positions";
 
 interface PerformanceData {
   totalPnL: number;
@@ -50,6 +51,7 @@ export default function PerformanceSectionMobile() {
     if (!performanceData || !allTrades) {
       return {
         completedTrades: [],
+        completedPositions: [],
         equityCurve: [],
         drawdown: { maxDrawdown: 0, maxDrawdownPercent: 0, currentDrawdown: 0 },
         sharpeRatio: 0,
@@ -61,12 +63,20 @@ export default function PerformanceSectionMobile() {
     }
 
     const completedTrades = allTrades.filter(trade => trade.pnl !== null);
-    
+
+    // A multi-leg position is stored one row per leg, so anything that counts
+    // or averages trades has to work from positions - otherwise every spread
+    // contributes a win and a loss. Each closed position is collapsed onto its
+    // first leg carrying the position's total, so the money is unchanged.
+    const completedPositions = groupIntoPositions(completedTrades)
+      .filter(position => position.pnl !== null)
+      .map(position => ({ ...position.legs[0], pnl: position.pnl as number }));
+
     // Calculate equity curve
     let balance = startingBalance;
     const equityCurve = [{ date: new Date().toISOString(), balance }];
     
-    completedTrades.forEach(trade => {
+    completedPositions.forEach(trade => {
       if (trade.exitTime) {
         balance += trade.pnl || 0;
         equityCurve.push({
@@ -85,18 +95,18 @@ export default function PerformanceSectionMobile() {
     const sharpeRatio = calculateSharpeRatio(dailyReturns);
 
     // Streak analysis
-    const streakAnalysis = getStreakAnalysis(completedTrades);
+    const streakAnalysis = getStreakAnalysis(completedPositions);
 
     // P&L distribution
     const bucketSize = 100;
     const pnlDistribution: Record<string, number> = {};
-    completedTrades.forEach(trade => {
+    completedPositions.forEach(trade => {
       const bucket = Math.floor((trade.pnl || 0) / bucketSize) * bucketSize;
       pnlDistribution[bucket.toString()] = (pnlDistribution[bucket.toString()] || 0) + 1;
     });
 
     // Risk/Reward scatter data
-    const riskRewardData = completedTrades.map(trade => {
+    const riskRewardData = completedPositions.map(trade => {
       const risk = Math.abs(trade.entryPrice * trade.quantity * 100 * 0.1); // Assume 10% risk
       return {
         x: risk,
@@ -107,7 +117,7 @@ export default function PerformanceSectionMobile() {
 
     // Monthly calendar data
     const monthlyCalendar: Record<string, number> = {};
-    completedTrades.forEach(trade => {
+    completedPositions.forEach(trade => {
       if (trade.exitTime) {
         const monthKey = new Date(trade.exitTime).toLocaleDateString('en-US', { 
           year: 'numeric', 
@@ -119,6 +129,7 @@ export default function PerformanceSectionMobile() {
 
     return {
       completedTrades,
+      completedPositions,
       equityCurve,
       drawdown,
       sharpeRatio,
@@ -145,8 +156,8 @@ export default function PerformanceSectionMobile() {
     );
   }
 
-  const winningTrades = analytics.completedTrades.filter(t => t.pnl! > 0);
-  const losingTrades = analytics.completedTrades.filter(t => t.pnl! <= 0);
+  const winningTrades = analytics.completedPositions.filter(t => t.pnl! > 0);
+  const losingTrades = analytics.completedPositions.filter(t => t.pnl! <= 0);
   const currentBalance = startingBalance + performanceData.totalPnL;
 
   // Convert daily P&L data for heatmap
@@ -284,7 +295,7 @@ export default function PerformanceSectionMobile() {
                 <p className="text-sm text-muted-foreground">Total Trades</p>
                 <p className="text-2xl font-bold text-foreground">{performanceData.totalTrades}</p>
                 <p className="text-xs text-muted-foreground">
-                  {analytics.completedTrades.length} completed
+                  {analytics.completedPositions.length} completed
                 </p>
               </div>
               <div className="w-12 h-12 bg-gray-100 dark:bg-gray-800 rounded-lg flex items-center justify-center">
@@ -356,8 +367,8 @@ export default function PerformanceSectionMobile() {
                 <p className="text-sm text-muted-foreground">Avg/Trade</p>
               </div>
               <p className="text-lg font-bold text-blue-600">
-                ${analytics.completedTrades.length > 0 
-                  ? (performanceData.totalPnL / analytics.completedTrades.length).toFixed(2)
+                ${analytics.completedPositions.length > 0 
+                  ? (performanceData.totalPnL / analytics.completedPositions.length).toFixed(2)
                   : '0.00'}
               </p>
               <p className="text-xs text-muted-foreground">

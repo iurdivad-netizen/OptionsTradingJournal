@@ -12,6 +12,7 @@ import { CloudUpload, Save, Image, X, Calendar, Clock } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import type { Trade, TradeAnalysis, IntradayNote, PlaybookStrategy } from "@shared/schema";
+import { groupIntoPositions } from "@shared/positions";
 import { format } from "date-fns";
 import { Calendar as CalendarComponent } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -118,6 +119,11 @@ export default function AnalysisSection() {
     const tradeDate = new Date(trade.tradeDate);
     return tradeDate.toDateString() === selectedDate.toDateString();
   });
+
+  // A multi-leg position is stored one row per leg, so the picker would
+  // otherwise offer the same position several times and have it journalled once
+  // per leg. Each position is offered once, anchored to its first leg.
+  const positionsOnDate = groupIntoPositions(tradesOnDate);
 
   // Filter notes by selected date
   const notesOnDate = intradayNotes.filter(note => {
@@ -263,22 +269,35 @@ export default function AnalysisSection() {
                         </SelectTrigger>
                       </FormControl>
                       <SelectContent>
-                        {tradesOnDate.length > 0 ? (
-                          tradesOnDate.map((trade) => {
+                        {positionsOnDate.length > 0 ? (
+                          positionsOnDate.map((position) => {
+                            const trade = position.legs[0];
                             const strategy = strategies.find(s => s.id === trade.playbookId);
+                            const isMultiLeg = position.legs.length > 1;
+                            const pnl = isMultiLeg ? position.pnl : trade.pnl;
                             return (
-                              <SelectItem key={trade.id} value={trade.id.toString()}>
+                              <SelectItem key={position.key} value={trade.id.toString()}>
                                 <div className="flex flex-col">
                                   <div>
-                                    Trade #{trade.id} - {trade.ticker} {trade.type}
-                                    {trade.pnl !== null && trade.pnl !== undefined ? (
-                                      <span className={trade.pnl >= 0 ? ' text-green-600' : ' text-red-600'}>
-                                        {' '}({trade.pnl >= 0 ? '+' : ''}${trade.pnl.toFixed(2)})
+                                    {isMultiLeg
+                                      ? `${trade.ticker} ${trade.strategyType || `${position.legs.length} legs`}`
+                                      : `Trade #${trade.id} - ${trade.ticker} ${trade.type}`}
+                                    {pnl !== null && pnl !== undefined ? (
+                                      <span className={pnl >= 0 ? ' text-green-600' : ' text-red-600'}>
+                                        {' '}({pnl >= 0 ? '+' : ''}${pnl.toFixed(2)})
                                       </span>
                                     ) : (
                                       <span className="text-gray-500"> (Pending)</span>
                                     )}
                                   </div>
+                                  {isMultiLeg && (
+                                    <div className="text-xs text-muted-foreground">
+                                      {position.legs.length} legs -{' '}
+                                      {position.legs
+                                        .map((leg) => `${leg.direction === 'short' ? 'S' : 'L'} ${leg.strikePrice}${leg.type === 'calls' ? 'C' : 'P'}`)
+                                        .join(' / ')}
+                                    </div>
+                                  )}
                                   {strategy && (
                                     <div className="text-xs text-muted-foreground">
                                       Strategy: {strategy.name}

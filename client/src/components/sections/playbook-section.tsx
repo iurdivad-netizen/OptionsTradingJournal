@@ -14,6 +14,7 @@ import { Plus, Edit, Trash2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import type { PlaybookStrategy, Trade } from "@shared/schema";
+import { statsFromLegs } from "@shared/positions";
 
 const strategyFormSchema = z.object({
   name: z.string().min(1, "Strategy name is required"),
@@ -141,25 +142,22 @@ export default function PlaybookSection() {
   // Calculate strategy performance
   const getStrategyPerformance = (strategy: PlaybookStrategy) => {
     const strategyTrades = trades.filter(trade => trade.playbookId === strategy.id && trade.pnl !== null);
-    const totalTrades = strategyTrades.length;
-    
-    if (totalTrades === 0) {
+
+    if (strategyTrades.length === 0) {
       return { winRate: 0, avgRR: 0, usage: 0, totalPnL: 0 };
     }
-    
-    const winningTrades = strategyTrades.filter(trade => trade.pnl !== null && trade.pnl > 0);
-    const winRate = (winningTrades.length / totalTrades) * 100;
-    
-    const avgWin = winningTrades.length > 0 ? 
-      winningTrades.reduce((sum, trade) => sum + (trade.pnl || 0), 0) / winningTrades.length : 0;
-    const losingTrades = strategyTrades.filter(trade => trade.pnl !== null && trade.pnl <= 0);
-    const avgLoss = losingTrades.length > 0 ? 
-      Math.abs(losingTrades.reduce((sum, trade) => sum + (trade.pnl || 0), 0) / losingTrades.length) : 0;
-    const avgRR = avgLoss > 0 ? avgWin / avgLoss : 0;
-    
+
+    // Win rate, R:R and usage count positions rather than legs, so a spread
+    // counts once. The P&L total adds up the legs, which comes to the same.
+    const stats = statsFromLegs(strategyTrades);
     const totalPnL = strategyTrades.reduce((sum, trade) => sum + (trade.pnl || 0), 0);
-    
-    return { winRate, avgRR, usage: totalTrades, totalPnL };
+
+    return {
+      winRate: stats.winRate,
+      avgRR: stats.avgRR,
+      usage: stats.positions,
+      totalPnL,
+    };
   };
 
   return (
