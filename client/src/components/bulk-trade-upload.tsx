@@ -48,6 +48,7 @@ interface TradePayload {
   expirationDate: Date;
   tradeDate: Date;
   pnl?: number;
+  fees?: number;
   entryReason: string;
   exitReason: string;
   timeClassification?: string;
@@ -284,6 +285,9 @@ export default function BulkTradeUpload({ onClose, onSuccess }: BulkTradeUploadP
         expirationDate: trade.expirationDate,
         tradeDate: trade.tradeDate,
         pnl: trade.pnl ?? undefined,
+        // Commissions and fees are already inside pnl; storing them separately
+        // is what lets the performance section show results before their drag.
+        fees: trade.fees,
         entryReason: describeEntry(trade),
         exitReason: describeExit(trade) || 'Position still open at time of import',
         timeClassification: classifyTimeOfDay(format(trade.entryTime, 'HH:mm')),
