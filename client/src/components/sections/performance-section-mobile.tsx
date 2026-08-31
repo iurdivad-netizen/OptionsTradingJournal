@@ -223,9 +223,11 @@ export default function PerformanceSectionMobile() {
   const heatmapData = useMemo(() => {
     if (!performanceData?.dailyPnL || !allTrades) return [];
     
-    // Group trades by date and calculate daily P&L
-    const dailyData: Record<string, { pnl: number; trades: number }> = {};
-    
+    // Collect each day's legs, so the count the calendar shows can be the
+    // number of positions traded that day rather than the number of rows they
+    // occupy - a day of three iron butterflies is three trades, not twelve.
+    const dailyData: Record<string, { pnl: number; legs: typeof allTrades }> = {};
+
     allTrades.forEach(trade => {
       if (trade.pnl !== null && trade.tradeDate) {
         // Normalize to local date to avoid timezone shifts
@@ -235,15 +237,15 @@ export default function PerformanceSectionMobile() {
         const day = tradeDate.getDate();
         const normalizedDate = new Date(year, month, day);
         const dateKey = normalizedDate.toDateString();
-        
+
         if (!dailyData[dateKey]) {
-          dailyData[dateKey] = { pnl: 0, trades: 0 };
+          dailyData[dateKey] = { pnl: 0, legs: [] };
         }
         dailyData[dateKey].pnl += trade.pnl;
-        dailyData[dateKey].trades += 1;
+        dailyData[dateKey].legs.push(trade);
       }
     });
-    
+
     const result = Object.entries(dailyData).map(([dateStr, data]) => {
       // Parse the date string properly to avoid timezone issues
       const parsedDate = new Date(dateStr);
@@ -252,7 +254,7 @@ export default function PerformanceSectionMobile() {
       return {
         date: localDate,
         pnl: data.pnl,
-        trades: data.trades
+        trades: groupIntoPositions(data.legs).length
       };
     });
     
